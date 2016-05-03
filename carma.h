@@ -76,16 +76,14 @@ public:
         }
     };
 
-    void predict (double yerr) {
+    void update (double y, double yerr) {
         // Steps 3 and 9 from Kelly et al.
         std::complex<double> E = b_ * x_;
         expect_y_ = E.real();
 
         std::complex<double> V = b_ * P_ * b_.adjoint();
         var_y_ = yerr * yerr + V.real();
-    };
 
-    void update (double y) {
         // Steps 4-6 and 10-12 from Kelly et al.
         Eigen::VectorXcd K = P_ * b_.adjoint() / var_y_;
         x_ += (y - expect_y_) * K;
@@ -105,12 +103,10 @@ public:
 
         reset();
         for (unsigned i = 0; i < n; ++i) {
-            predict(yerr(i));
+            update(y(i), yerr(i));
             if (var_y_ < 0.0) throw _CARMA_SOLVER_UNSTABLE_;
             r = y(i) - expect_y_;
             ll += r * r / var_y_ + log(var_y_);
-
-            update(y(i));
             if (i < n - 1) advance(x(i+1) - x(i));
         }
 
