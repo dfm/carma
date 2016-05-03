@@ -145,4 +145,4 @@ double compute_log_likelihood (double sigma,
 
 }; // namespace carma
 
-#endif // _CARMA_KALMAN_H_
+#endif // _CARMA_CARMA_H_
