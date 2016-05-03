@@ -68,6 +68,8 @@ class build_ext(_build_ext):
 
         # Update the extension's include directories.
         ext.include_dirs += [eigen_include]
+        ext.extra_compile_args += ["-Wno-unused-function",
+                                   "-Wno-uninitialized"]
 
         # Run the standard build procedure.
         _build_ext.build_extension(self, ext)
@@ -101,7 +103,9 @@ if __name__ == "__main__":
         src = [src + ".pyx"]
     else:
         src = [src + ".cpp"]
-        cythonize = lambda x: x
+
+        def cythonize(x):
+            return x
 
     # Set up the extension.
     ext = Extension("carma._carma", sources=src,

@@ -31,11 +31,14 @@ Eigen::VectorXcd poly_from_roots (const Eigen::VectorXcd& roots) {
 //
 // This class evaluates the log likelihood of a CARMA model using a Kalman filter.
 //
+template <typename T>
 class CARMASolver {
 public:
 
-    CARMASolver (double sigma, Eigen::VectorXcd arroots, Eigen::VectorXcd maroots)
-    : p_(arroots.rows()), q_(maroots.rows()), arroots_(arroots),
+    CARMASolver (T sigma, Eigen::Matrix<T, Eigen::Dynamic, 1> arroots,
+                 Eigen::Matrix<T, Eigen::Dynamic, 1> maroots)
+    : sigma_(sigma), p_(arroots.rows()), q_(maroots.rows()),
+      arroots_(arroots), maroots_(maroots),
       b_(Eigen::MatrixXcd::Zero(1, p_)), lambda_base_(p_)
     {
         // Pre-compute the base lambda vector.
@@ -49,9 +52,10 @@ public:
                 U(i, j) = pow(arroots_(j), i);
 
         // Compute the polynomial coefficients and rotate into the diagonalized space.
-        Eigen::VectorXcd beta = poly_from_roots(maroots);
-        beta /= beta(0);
-        b_.head(q_ + 1) = beta;
+        alpha_ = poly_from_roots(arroots);
+        beta_ = poly_from_roots(maroots);
+        beta_ /= beta_(0);
+        b_.head(q_ + 1) = beta_;
         b_ = b_ * U;
 
         // Compute V.
@@ -111,11 +115,43 @@ public:
         return -0.5 * ll;
     };
 
+    double psd (double f) const {
+        std::complex<double> w(0.0, 2.0 * M_PI * f), num = 0.0, denom = 0.0;
+        for (unsigned i = 0; i < q_+1; ++i)
+            num += beta_(i) * pow(w, i);
+        for (unsigned i = 0; i < p_+1; ++i)
+            denom += alpha_(i) * pow(w, i);
+        return std::norm(sigma_) * std::norm(num) / std::norm(denom);
+    };
+
+    double covariance (double tau) const {
+        std::complex<double> n1, n2, norm, value = 0.0;
+
+        for (unsigned k = 0; k < p_; ++k) {
+            n1 = 0.0;
+            n2 = 0.0;
+            for (unsigned l = 0; l < q_+1; ++l) {
+                n1 += beta_(l) * pow(arroots_(k), l);
+                n2 += beta_(l) * pow(-arroots_(k), l);
+            }
+            norm = n1 * n2 / arroots_(k).real();
+            for (unsigned l = 0; l < p_; ++l) {
+                if (l != k)
+                    norm /= (arroots_(l) - arroots_(k)) * (std::conj(arroots_(l)) + arroots_(k));
+            }
+            value += norm * exp(arroots_(k) * tau);
+        }
+
+        return -0.5 * std::norm(sigma_) * value.real();
+    };
+
 
 private:
 
+    T sigma_;
     unsigned p_, q_;
-    Eigen::VectorXcd arroots_;
+    Eigen::VectorXcd arroots_, maroots_;
+    Eigen::VectorXcd alpha_, beta_;
     Eigen::RowVectorXcd b_;
 
     Eigen::MatrixXcd V_;
@@ -125,21 +161,43 @@ private:
 
 
 //
-// A C-type wrapper around the CARMASolver functions.
+// C-type wrappers around the CARMASolver functions.
 //
-double compute_log_likelihood (double sigma,
-                               unsigned p, std::complex<double>* ar,
-                               unsigned q, std::complex<double>* ma,
-                               unsigned n, double* t, double* y, double* yerr)
+double log_likelihood (double sigma,
+                       unsigned p, std::complex<double>* ar,
+                       unsigned q, std::complex<double>* ma,
+                       unsigned n, double* t, double* y, double* yerr)
 {
     Eigen::Map<Eigen::VectorXcd> arroots(ar, p), maroots(ma, q);
-    CARMASolver solver(sigma, arroots, maroots);
+    CARMASolver<std::complex<double> > solver(sigma, arroots, maroots);
 
     Eigen::Map<Eigen::VectorXd> tvec(t, n),
                                 yvec(y, n),
                                 yerrvec(yerr, n);
 
     return solver.log_likelihood(tvec, yvec, yerrvec);
+};
+
+void psd (double sigma,
+          unsigned p, std::complex<double>* ar,
+          unsigned q, std::complex<double>* ma,
+          unsigned n, double* f, double* out)
+{
+    Eigen::Map<Eigen::VectorXcd> arroots(ar, p), maroots(ma, q);
+    CARMASolver<std::complex<double> > solver(sigma, arroots, maroots);
+    for (unsigned i = 0; i < n; ++i)
+        out[i] = solver.psd(f[i]);
+};
+
+void covariance (double sigma,
+                 unsigned p, std::complex<double>* ar,
+                 unsigned q, std::complex<double>* ma,
+                 unsigned n, double* tau, double* out)
+{
+    Eigen::Map<Eigen::VectorXcd> arroots(ar, p), maroots(ma, q);
+    CARMASolver<std::complex<double> > solver(sigma, arroots, maroots);
+    for (unsigned i = 0; i < n; ++i)
+        out[i] = solver.covariance(tau[i]);
 };
 
 
