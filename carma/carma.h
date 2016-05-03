@@ -28,15 +28,28 @@ Eigen::VectorXcd poly_from_roots (const Eigen::VectorXcd& roots) {
 }
 
 
+struct Prediction {
+    double expectation;
+    double variance;
+};
+
+
+struct State {
+    double time;
+    Eigen::VectorXcd x;
+    Eigen::MatrixXcd P;
+};
+
+
 //
 // This class evaluates the log likelihood of a CARMA model using a Kalman filter.
 //
-template <typename T>
 class CARMASolver {
 public:
 
-    CARMASolver (T sigma, Eigen::Matrix<T, Eigen::Dynamic, 1> arroots,
-                 Eigen::Matrix<T, Eigen::Dynamic, 1> maroots)
+    CARMASolver (std::complex<double> sigma,
+                 Eigen::Matrix<std::complex<double>, Eigen::Dynamic, 1> arroots,
+                 Eigen::Matrix<std::complex<double>, Eigen::Dynamic, 1> maroots)
     : sigma_(sigma), p_(arroots.rows()), q_(maroots.rows()),
       arroots_(arroots), maroots_(maroots),
       b_(Eigen::MatrixXcd::Zero(1, p_)), lambda_base_(p_)
@@ -73,43 +86,56 @@ public:
                 V_(i, j) /= arroots_(i) + std::conj(arroots_(j));
     };
 
+    void reset (double t) {
+        // Step 2 from Kelly et al.
+        state_.time = t;
+        state_.x = Eigen::VectorXcd::Zero(p_);
+        state_.P = V_;
+    };
+
+    Prediction predict (double yerr) const {
+        // Steps 3 and 9 from Kelly et al.
+        Prediction pred;
+        std::complex<double> tmp = b_ * state_.x;
+        pred.expectation = tmp.real();
+        tmp = b_ * state_.P * b_.adjoint();
+        pred.variance = yerr * yerr + tmp.real();
+
+        // Check the variance value for instability.
+        if (pred.variance < 0.0) throw _CARMA_SOLVER_UNSTABLE_;
+        return pred;
+    };
+
+    void update_state (const Prediction& pred, double y) {
+        // Steps 4-6 and 10-12 from Kelly et al.
+        Eigen::VectorXcd K = state_.P * b_.adjoint() / pred.variance;
+        state_.x += (y - pred.expectation) * K;
+        state_.P -= pred.variance * K * K.adjoint();
+    };
+
+    void advance_time (double dt) {
+        // Steps 7 and 8 from Kelly et al.
+        Eigen::VectorXcd lam = pow(lambda_base_, dt).matrix();
+        state_.time += dt;
+        for (unsigned i = 0; i < p_; ++i) state_.x(i) *= lam(i);
+        state_.P = lam.asDiagonal() * (state_.P - V_) * lam.conjugate().asDiagonal() + V_;
+    };
+
     double log_likelihood (Eigen::VectorXd t, Eigen::VectorXd y, Eigen::VectorXd yerr) {
         unsigned n = t.rows();
-        std::complex<double> tmp;
-        double expect_y, var_y, r, ll = n * log(2.0 * M_PI);
+        double r, ll = n * log(2.0 * M_PI);
+        Prediction pred;
 
-        Eigen::VectorXcd lam, K, x;
-        Eigen::MatrixXcd P;
-
-        // Step 2 from Kelly et al.
-        x = Eigen::VectorXcd::Zero(p_);
-        P = V_;
-
+        reset(t(0));
         for (unsigned i = 0; i < n; ++i) {
-            // Steps 3 and 9 from Kelly et al.
-            tmp = b_ * x;
-            expect_y = tmp.real();
-            tmp = b_ * P * b_.adjoint();
-            var_y = yerr(i) * yerr(i) + tmp.real();
+            // Integrate the Kalman filter.
+            pred = predict(yerr(i));
+            update_state(pred, y(i));
+            if (i < n - 1) advance_time(t(i+1) - t(i));
 
-            // Check the variance value for instability.
-            if (var_y < 0.0) throw _CARMA_SOLVER_UNSTABLE_;
-
-            // Update the likelihood calculation.
-            r = y(i) - expect_y;
-            ll += r * r / var_y + log(var_y);
-
-            // Steps 4-6 and 10-12 from Kelly et al.
-            K = P * b_.adjoint() / var_y;
-            x += (y(i) - expect_y) * K;
-            P -= var_y * K * K.adjoint();
-
-            if (i < n - 1) {
-                // Steps 7 and 8 from Kelly et al.
-                lam = pow(lambda_base_, t(i+1) - t(i)).matrix();
-                for (unsigned i = 0; i < p_; ++i) x(i) *= lam(i);
-                P = lam.asDiagonal() * (P - V_) * lam.conjugate().asDiagonal() + V_;
-            }
+            // Update the likelihood evaluation.
+            r = y(i) - pred.expectation;
+            ll += r * r / pred.variance + log(pred.variance);
         }
 
         return -0.5 * ll;
@@ -148,7 +174,7 @@ public:
 
 private:
 
-    T sigma_;
+    std::complex<double> sigma_;
     unsigned p_, q_;
     Eigen::VectorXcd arroots_, maroots_;
     Eigen::VectorXcd alpha_, beta_;
@@ -156,6 +182,7 @@ private:
 
     Eigen::MatrixXcd V_;
     Eigen::ArrayXcd lambda_base_;
+    State state_;
 
 }; // class CARMASolver
 
@@ -169,7 +196,7 @@ double log_likelihood (double sigma,
                        unsigned n, double* t, double* y, double* yerr)
 {
     Eigen::Map<Eigen::VectorXcd> arroots(ar, p), maroots(ma, q);
-    CARMASolver<std::complex<double> > solver(sigma, arroots, maroots);
+    CARMASolver solver(sigma, arroots, maroots);
 
     Eigen::Map<Eigen::VectorXd> tvec(t, n),
                                 yvec(y, n),
@@ -184,7 +211,7 @@ void psd (double sigma,
           unsigned n, double* f, double* out)
 {
     Eigen::Map<Eigen::VectorXcd> arroots(ar, p), maroots(ma, q);
-    CARMASolver<std::complex<double> > solver(sigma, arroots, maroots);
+    CARMASolver solver(sigma, arroots, maroots);
     for (unsigned i = 0; i < n; ++i)
         out[i] = solver.psd(f[i]);
 };
@@ -195,7 +222,7 @@ void covariance (double sigma,
                  unsigned n, double* tau, double* out)
 {
     Eigen::Map<Eigen::VectorXcd> arroots(ar, p), maroots(ma, q);
-    CARMASolver<std::complex<double> > solver(sigma, arroots, maroots);
+    CARMASolver solver(sigma, arroots, maroots);
     for (unsigned i = 0; i < n; ++i)
         out[i] = solver.covariance(tau[i]);
 };
