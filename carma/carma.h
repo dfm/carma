@@ -27,12 +27,15 @@ Eigen::VectorXcd poly_from_roots (const Eigen::VectorXcd& roots) {
     return poly;
 }
 
+
+//
+// This class evaluates the log likelihood of a CARMA model using a Kalman filter.
+//
 class CARMASolver {
 public:
 
     CARMASolver (double sigma, Eigen::VectorXcd arroots, Eigen::VectorXcd maroots)
-    : sigma_(sigma), arroots_(arroots),
-      p_(arroots.rows()), q_(maroots.rows()),
+    : p_(arroots.rows()), q_(maroots.rows()), arroots_(arroots),
       b_(Eigen::MatrixXcd::Zero(1, p_)), lambda_base_(p_)
     {
         // Pre-compute the base lambda vector.
@@ -112,7 +115,6 @@ public:
 private:
 
     unsigned p_, q_;
-    double sigma_;
     Eigen::VectorXcd arroots_;
     Eigen::RowVectorXcd b_;
 
@@ -122,15 +124,15 @@ private:
 }; // class CARMASolver
 
 
-double compute_log_likelihood (double sigma, unsigned p, double* arreal, double* arimag,
-                               unsigned q, double* mareal, double* maimag,
+//
+// A C-type wrapper around the CARMASolver functions.
+//
+double compute_log_likelihood (double sigma,
+                               unsigned p, std::complex<double>* ar,
+                               unsigned q, std::complex<double>* ma,
                                unsigned n, double* t, double* y, double* yerr)
 {
-    Eigen::VectorXcd arroots(p), maroots(q);
-    for (unsigned i = 0; i < p; ++i)
-        arroots(i) = std::complex<double>(arreal[i], arimag[i]);
-    for (unsigned i = 0; i < q; ++i)
-        maroots(i) = std::complex<double>(mareal[i], maimag[i]);
+    Eigen::Map<Eigen::VectorXcd> arroots(ar, p), maroots(ma, q);
     CARMASolver solver(sigma, arroots, maroots);
 
     Eigen::Map<Eigen::VectorXd> tvec(t, n),

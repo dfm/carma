@@ -135,34 +135,24 @@ def carma_covar(sigma, arroots, maroots, tau):
 if __name__ == "__main__":
     import time
     import matplotlib.pyplot as pl
+
+    from carma._carma import carma_log_likelihood
+
     np.random.seed(1234)
 
     sigma = 0.1
-
-    # freqs = [1.0, 2.0, 0.01]
-    # a = get_arroots(freqs, [1.0, 2.0, 0.1])
-
-    # b = -np.random.rand(1) - 1.j * np.random.rand(1)
-    # b = np.array(list(set(list(np.append(b, np.conjugate(b))))))
-
     a = np.array([-0.5 + 0.01j, -0.5 - 0.01j, -1.0 + 0.1j, -1.0 - 0.1j])
     b = np.array([-0.5 + 0.1j, -0.5 - 0.1j])
-    # b = np.array([1.0, 0.5])
 
-    # print(a)
-    # print(b)
-
-    # x = np.sort(np.random.rand(1000))
+    x = np.sort(np.random.rand(2000))
     # x = np.linspace(0, 1, 50)
-    x = np.array([0.5, 0.6, 10.0])
+    # x = np.array([0.5, 0.6, 10.0])
     yerr = 0.1 * np.ones_like(x)
-    y = 0.1 * x
+    y = 0.01 * x
 
     strt = time.time()
     model = CARMA(sigma, a, b)
     ll1 = model.log_likelihood(x, y, yerr)
-    print(ll1)
-    assert 0
     print(time.time() - strt)
 
     strt = time.time()
@@ -173,7 +163,11 @@ if __name__ == "__main__":
     ll2 -= 0.5 * len(x) * np.log(2*np.pi)
     print(time.time() - strt)
 
-    print(ll1 - ll2)
+    strt = time.time()
+    ll3 = carma_log_likelihood(sigma, a, b, x, y, yerr)
+    print(time.time() - strt)
+
+    print(ll1, ll2, ll3)
 
     pl.clf()
     tau = np.atleast_2d(np.linspace(0, 10, 10000))
