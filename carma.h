@@ -68,6 +68,7 @@ public:
     };
 
     void reset () {
+        // Step 2 from Kelly et al.
         for (unsigned i = 0; i < p_; ++i) {
             x_(i) = 0.0;
             for (unsigned j = 0; j < p_; ++j)
@@ -76,6 +77,7 @@ public:
     };
 
     void predict (double yerr) {
+        // Steps 3 and 9 from Kelly et al.
         std::complex<double> E = b_ * x_;
         expect_y_ = E.real();
 
@@ -84,12 +86,14 @@ public:
     };
 
     void update (double y) {
+        // Steps 4-6 and 10-12 from Kelly et al.
         Eigen::VectorXcd K = P_ * b_.adjoint() / var_y_;
         x_ += (y - expect_y_) * K;
         P_ -= var_y_ * K * K.adjoint();
     };
 
     void advance (double dt) {
+        // Steps 7 and 8 from Kelly et al.
         Eigen::MatrixXcd lam = pow(lambda_base_, dt).matrix();
         for (unsigned i = 0; i < p_; ++i) x_(i) *= lam(i);
         P_ = lam.asDiagonal() * (P_ - V_) * lam.conjugate().asDiagonal() + V_;
