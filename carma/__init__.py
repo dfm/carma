@@ -8,4 +8,6 @@ except NameError:
     __CARMA_SETUP__ = False
 
 if not __CARMA_SETUP__:
-    __all__ = []
+    __all__ = ["CARMAModel"]
+
+    from .carma import CARMAModel

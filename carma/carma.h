@@ -15,6 +15,7 @@ Eigen::VectorXcd roots_from_params (const Eigen::VectorXd& params) {
     unsigned n = params.rows();
     std::complex<double> b, c, arg;
     Eigen::VectorXcd roots(n);
+    if (n == 0) return roots;
     if (n % 2 == 1) roots(n - 1) = -exp(params(n - 1));
     for (unsigned i = 0; i < n-1; i += 2) {
         b = exp(params(i+1));
@@ -61,8 +62,8 @@ struct State {
 class CARMASolver {
 public:
 
-    CARMASolver (double sigma, Eigen::VectorXd arpars, Eigen::VectorXd mapars)
-    : sigma_(sigma), p_(arpars.rows()), q_(mapars.rows()),
+    CARMASolver (double log_sigma, Eigen::VectorXd arpars, Eigen::VectorXd mapars)
+    : sigma_(exp(log_sigma)), p_(arpars.rows()), q_(mapars.rows()),
       arroots_(roots_from_params(arpars)), maroots_(roots_from_params(mapars)),
       b_(Eigen::MatrixXcd::Zero(1, p_)), lambda_base_(p_)
     {
@@ -70,22 +71,24 @@ public:
         for (unsigned i = 0; i < p_; ++i)
             lambda_base_(i) = exp(arroots_(i));
 
+        // Compute the polynomial coefficients and rotate into the diagonalized space.
+        alpha_ = poly_from_roots(arroots_);
+        beta_ = poly_from_roots(maroots_);
+        beta_ /= beta_(0);
+    };
+
+    void setup () {
         // Construct the rotation matrix for the diagonalized space.
         Eigen::MatrixXcd U(p_, p_);
         for (unsigned i = 0; i < p_; ++i)
             for (unsigned j = 0; j < p_; ++j)
                 U(i, j) = pow(arroots_(j), i);
-
-        // Compute the polynomial coefficients and rotate into the diagonalized space.
-        alpha_ = poly_from_roots(arroots_);
-        beta_ = poly_from_roots(maroots_);
-        beta_ /= beta_(0);
         b_.head(q_ + 1) = beta_;
         b_ = b_ * U;
 
         // Compute V.
         Eigen::VectorXcd e = Eigen::VectorXcd::Zero(p_);
-        e(p_ - 1) = sigma;
+        e(p_ - 1) = sigma_;
 
         // J = U \ e
         Eigen::FullPivLU<Eigen::MatrixXcd> lu(U);
@@ -202,11 +205,12 @@ private:
 //
 // C-type wrappers around the CARMASolver functions.
 //
-double log_likelihood (double sigma, unsigned p, double* ar, unsigned q, double* ma,
+double log_likelihood (double log_sigma, unsigned p, double* ar, unsigned q, double* ma,
                        unsigned n, double* t, double* y, double* yerr)
 {
-    Eigen::Map<Eigen::VectorXd> arroots(ar, p), maroots(ma, q);
-    CARMASolver solver(sigma, arroots, maroots);
+    Eigen::Map<Eigen::VectorXd> arpars(ar, p), mapars(ma, q);
+    CARMASolver solver(log_sigma, arpars, mapars);
+    solver.setup();
 
     Eigen::Map<Eigen::VectorXd> tvec(t, n),
                                 yvec(y, n),
@@ -215,20 +219,20 @@ double log_likelihood (double sigma, unsigned p, double* ar, unsigned q, double*
     return solver.log_likelihood(tvec, yvec, yerrvec);
 };
 
-void psd (double sigma, unsigned p, double* ar, unsigned q, double* ma,
+void psd (double log_sigma, unsigned p, double* ar, unsigned q, double* ma,
           unsigned n, double* f, double* out)
 {
-    Eigen::Map<Eigen::VectorXd> arroots(ar, p), maroots(ma, q);
-    CARMASolver solver(sigma, arroots, maroots);
+    Eigen::Map<Eigen::VectorXd> arpars(ar, p), mapars(ma, q);
+    CARMASolver solver(log_sigma, arpars, mapars);
     for (unsigned i = 0; i < n; ++i)
         out[i] = solver.psd(f[i]);
 };
 
-void covariance (double sigma, unsigned p, double* ar, unsigned q, double* ma,
+void covariance (double log_sigma, unsigned p, double* ar, unsigned q, double* ma,
                  unsigned n, double* tau, double* out)
 {
-    Eigen::Map<Eigen::VectorXd> arroots(ar, p), maroots(ma, q);
-    CARMASolver solver(sigma, arroots, maroots);
+    Eigen::Map<Eigen::VectorXd> arpars(ar, p), mapars(ma, q);
+    CARMASolver solver(log_sigma, arpars, mapars);
     for (unsigned i = 0; i < n; ++i)
         out[i] = solver.covariance(tau[i]);
 };

@@ -11,85 +11,81 @@ ctypedef np.float64_t DTYPE_t
 
 cdef extern from "carma.h" namespace "carma":
     cdef double log_likelihood(
-        double sigma, unsigned p, double* ar, unsigned q, double* ma,
+        double log_sigma, unsigned p, double* ar, unsigned q, double* ma,
         unsigned n, double* t, double* y, double* yerr
     ) except +
 
     cdef double psd(
-        double sigma, unsigned p, double* ar, unsigned q, double* ma,
+        double log_sigma, unsigned p, double* ar, unsigned q, double* ma,
         unsigned n, double* f, double* out
-    )
+    ) except +
 
     cdef double covariance(
-        double sigma, unsigned p, double* ar, unsigned q, double* ma,
+        double log_sigma, unsigned p, double* ar, unsigned q, double* ma,
         unsigned n, double* tau, double* out
-    )
+    ) except +
 
 
-def check_roots(
-    np.ndarray[DTYPE_t, ndim=1, mode='c'] arroots,
-    np.ndarray[DTYPE_t, ndim=1, mode='c'] maroots,
+def check_pars(
+    np.ndarray[DTYPE_t, ndim=1, mode='c'] arpars,
+    np.ndarray[DTYPE_t, ndim=1, mode='c'] mapars,
 ):
-    if len(maroots) >= len(arroots):
+    if len(mapars) >= len(arpars):
         raise ValueError("q must be less than p")
-
-    # if not np.all(arroots.real < 0.0):
-    #     raise ValueError("arroots must have negative real parts")
-    # if not len(set(arroots) & set(np.conjugate(arroots))) == len(arroots):
-    #     raise ValueError("arroots must have all conjugate pairs")
-
-    # if not np.all(maroots.real < 0.0):
-    #     raise ValueError("maroots must have negative real parts")
-    # if not len(set(maroots) & set(np.conjugate(maroots))) == len(maroots):
-    #     raise ValueError("maroots must have all conjugate pairs")
 
 
 def carma_log_likelihood(
-    double sigma,
-    np.ndarray[DTYPE_t, ndim=1, mode='c'] arroots,
-    np.ndarray[DTYPE_t, ndim=1, mode='c'] maroots,
+    double log_sigma,
+    np.ndarray[DTYPE_t, ndim=1, mode='c'] arpars,
+    np.ndarray[DTYPE_t, ndim=1, mode='c'] mapars,
     np.ndarray[DTYPE_t, ndim=1, mode='c'] x,
     np.ndarray[DTYPE_t, ndim=1, mode='c'] y,
     np.ndarray[DTYPE_t, ndim=1, mode='c'] yerr
 ):
-    check_roots(arroots, maroots)
+    check_pars(arpars, mapars)
 
     if len(x) != len(y) or len(y) != len(yerr):
         raise ValueError("dimension mismatch")
 
     return log_likelihood(
-        sigma, len(arroots), <double*>arroots.data,
-        len(maroots), <double*>maroots.data,
+        log_sigma, len(arpars), <double*>arpars.data,
+        len(mapars), <double*>mapars.data,
         len(x), <double*>x.data, <double*>y.data, <double*>yerr.data
     )
 
 
 def carma_psd(
-    double sigma,
-    np.ndarray[DTYPE_t, ndim=1, mode='c'] arroots,
-    np.ndarray[DTYPE_t, ndim=1, mode='c'] maroots,
+    double log_sigma,
+    np.ndarray[DTYPE_t, ndim=1, mode='c'] arpars,
+    np.ndarray[DTYPE_t, ndim=1, mode='c'] mapars,
     f
 ):
-    check_roots(arroots, maroots)
+    check_pars(arpars, mapars)
     cdef np.ndarray[DTYPE_t] f_array = np.atleast_1d(f).ravel()
     cdef np.ndarray[DTYPE_t] values = np.empty_like(f_array)
-    psd(sigma, len(arroots), <double*>arroots.data,
-        len(maroots), <double*>maroots.data,
+    psd(log_sigma, len(arpars), <double*>arpars.data,
+        len(mapars), <double*>mapars.data,
         f_array.size, <double*>f_array.data, <double*>values.data)
-    return values.reshape(f.shape)
+    try:
+        return values.reshape(f.shape)
+    except AttributeError:
+        return float(values)
 
 
 def carma_covariance(
-    double sigma,
-    np.ndarray[DTYPE_t, ndim=1, mode='c'] arroots,
-    np.ndarray[DTYPE_t, ndim=1, mode='c'] maroots,
+    double log_sigma,
+    np.ndarray[DTYPE_t, ndim=1, mode='c'] arpars,
+    np.ndarray[DTYPE_t, ndim=1, mode='c'] mapars,
     tau
 ):
-    check_roots(arroots, maroots)
+    check_pars(arpars, mapars)
 
-    cdef np.ndarray[DTYPE_t] tau_array = np.atleast_1d(tau).ravel()
+    cdef np.ndarray[DTYPE_t] tau_array = np.abs(np.atleast_1d(tau).ravel())
     cdef np.ndarray[DTYPE_t] values = np.empty_like(tau_array)
-    covariance(sigma, len(arroots), <double*>arroots.data,
-               len(maroots), <double*>maroots.data,
+    covariance(log_sigma, len(arpars), <double*>arpars.data,
+               len(mapars), <double*>mapars.data,
                tau_array.size, <double*>tau_array.data, <double*>values.data)
-    return values.reshape(tau.shape)
+    try:
+        return values.reshape(tau.shape)
+    except AttributeError:
+        return float(values)
